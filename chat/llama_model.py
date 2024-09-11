@@ -6,7 +6,8 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 os.environ["HF_TOKEN"] = "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"
 
-nf4_config = BitsAndBytesConfig(load_in_4bit=True,bnb_4bit_quant_type="nf4")
+# Setup 4-bit quantization config
+nf4_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
 
 class Llama3:
     def __init__(self, model_path):
@@ -14,8 +15,8 @@ class Llama3:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
         
-        # Load the model and move it to the GPU (or CPU if no GPU available)
-        self.model = AutoModelForCausalLM.from_pretrained(model_path, quantization_config=nf4_config).to(self.device)
+        # Load the model with 4-bit quantization and it is already on the correct device
+        self.model = AutoModelForCausalLM.from_pretrained(model_path, quantization_config=nf4_config)
         self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
 
@@ -26,7 +27,7 @@ class Llama3:
 
         generated_ids = input_ids
 
-        # Generate in chunks of batch_size tokens
+        # Generate in chunks of 50 tokens
         for _ in range(0, max_tokens, 50):
             output = self.model.generate(
                 input_ids=generated_ids,
@@ -87,5 +88,4 @@ class Llama3:
         for token in response_stream:
             yield token
         yield "\n"
-
 
