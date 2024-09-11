@@ -11,7 +11,7 @@ class Llama3:
         
         # Load the model and move it to the GPU (or CPU if no GPU available)
         self.model = AutoModelForCausalLM.from_pretrained(model_path).to(self.device)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_auth_token="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")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
         self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
 
     def generate_text_stream(self, prompt, max_tokens=2048, temperature=0.1, top_p=0.9):
