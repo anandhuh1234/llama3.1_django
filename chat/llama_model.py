@@ -1,13 +1,7 @@
-import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-
-os.environ["HF_TOKEN"] = "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"
-
-# Setup 4-bit quantization config
-nf4_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class Llama3:
     def __init__(self, model_path):
@@ -15,9 +9,9 @@ class Llama3:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Using device: {self.device}")
         
-        # Load the model with 4-bit quantization and it is already on the correct device
-        self.model = AutoModelForCausalLM.from_pretrained(model_path, quantization_config=nf4_config)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        # Load the model and move it to the GPU (or CPU if no GPU available)
+        self.model = AutoModelForCausalLM.from_pretrained(model_path).to(self.device)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, use_auth_token="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")
         self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
 
     def generate_text_stream(self, prompt, max_tokens=2048, temperature=0.1, top_p=0.9):
@@ -27,12 +21,12 @@ class Llama3:
 
         generated_ids = input_ids
 
-        # Generate in chunks of 50 tokens
-        for _ in range(0, max_tokens, 50):
+        # Generate in chunks of batch_size tokens
+        for _ in range(0, max_tokens, 1):
             output = self.model.generate(
                 input_ids=generated_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=50,  # Generate multiple tokens at once
+                max_new_tokens=1,  # Generate multiple tokens at once
                 eos_token_id=self.tokenizer.eos_token_id,
                 do_sample=True,
                 temperature=temperature,
@@ -42,7 +36,7 @@ class Llama3:
                 return_dict_in_generate=True
             )
 
-            next_token_ids = output.sequences[:, -50:]
+            next_token_ids = output.sequences[:, -1:]
             generated_ids = torch.cat((generated_ids, next_token_ids), dim=-1)
 
             attention_mask = torch.cat([attention_mask, torch.ones_like(next_token_ids).to(self.device)], dim=-1)
