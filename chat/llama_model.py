@@ -2,90 +2,51 @@ import os
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, TextStreamer
+import bitsandbytes as bnb
 
 os.environ["HF_TOKEN"] = "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"
 
-# Setup 4-bit quantization config
-nf4_config = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4")
+# Configure NF4 quantization using BitsAndBytesConfig
+nf4_config = BitsAndBytesConfig(
+    load_in_4bit=True,  
+    bnb_4bit_quant_type="nf4",  
+    bnb_4bit_use_double_quant=True,  
+    bnb_4bit_compute_dtype=torch.bfloat16  
+)
 
-class Llama3:
-    def __init__(self, model_path):
-        # Proper device setup for GPU usage
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Using device: {self.device}")
-        
-        # Load the model with 4-bit quantization and it is already on the correct device
-        self.model = AutoModelForCausalLM.from_pretrained(model_path, quantization_config=nf4_config)
-        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
-        self.tokenizer.pad_token_id = self.tokenizer.unk_token_id
+model = AutoModelForCausalLM.from_pretrained(
+    "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    quantization_config=nf4_config,  
+    device_map="auto"
+)
 
-    def generate_text_stream(self, prompt, max_tokens=2048, temperature=0.1, top_p=0.9):
-        # Move input tensors to the correct device
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(self.device)
-        attention_mask = torch.ones_like(input_ids).to(self.device)
+# Load the tokenizer
+tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3.1-70B-Instruct")
 
-        generated_ids = input_ids
+streamer = TextStreamer(tokenizer)
 
-        # Generate in chunks of 50 tokens
-        for _ in range(0, max_tokens, 50):
-            output = self.model.generate(
-                input_ids=generated_ids,
-                attention_mask=attention_mask,
-                max_new_tokens=50,  # Generate multiple tokens at once
-                eos_token_id=self.tokenizer.eos_token_id,
-                do_sample=True,
-                temperature=temperature,
-                top_p=top_p,
-                pad_token_id=self.tokenizer.eos_token_id,
-                output_scores=False,  # No need to output scores for inference
-                return_dict_in_generate=True
-            )
+pipeline = transformers.pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    device_map="auto",
+    streamer=streamer
+)
 
-            next_token_ids = output.sequences[:, -50:]
-            generated_ids = torch.cat((generated_ids, next_token_ids), dim=-1)
 
-            attention_mask = torch.cat([attention_mask, torch.ones_like(next_token_ids).to(self.device)], dim=-1)
-
-            # Decode the new tokens and stream them
-            next_tokens = self.tokenizer.decode(next_token_ids[0], skip_special_tokens=True)
-            print(next_tokens, end="")
-            yield next_tokens
-
-            # Stop generation if EOS token is found
-            if self.tokenizer.eos_token_id in next_token_ids[0]:
-                break
-
-    def get_response(self, query, system_msg, max_tokens=2048, temperature=0.1, top_p=0.9):
-        # Generate a prompt based on user and system messages
-        user_prompt = system_msg + [{"role": "user", "content": query}]
-        prompt = self.tokenizer.apply_chat_template(user_prompt, tokenize=False, add_generation_prompt=True)
-        input_ids = self.tokenizer(prompt, return_tensors="pt").input_ids.to(self.device)
-
-        # Generate response with specified batch size
-        output = self.model.generate(
-            input_ids=input_ids,
-            max_new_tokens=max_tokens,
-            do_sample=True,
-            temperature=temperature,
-            top_p=top_p
+def _chatbot(self, user_input, max_tokens=2048, temperature=0.1, top_p=0.9, system_instructions="You are a helpful assistant."):
+    system_msg = [
+            {"role": "system", "content": system_instructions},
+            {"role": "user", "content": user_input}
+        ]
+    outputs = pipeline(
+            messages,
+            max_new_tokens=max_tokens
         )
-
-        response = self.tokenizer.decode(output[0], skip_special_tokens=True)
-        return response
-
-    def get_response_stream(self, query, system_msg, max_tokens=2048, temperature=0.1, top_p=0.9):
-        # Generate a prompt based on user and system messages
-        user_prompt = system_msg + [{"role": "user", "content": query}]
-        prompt = self.tokenizer.apply_chat_template(user_prompt, tokenize=False, add_generation_prompt=True)
-        return self.generate_text_stream(prompt, max_tokens, temperature, top_p)
-
-    def _chatbot(self, user_input, max_tokens=2048, temperature=0.1, top_p=0.9, system_instructions="You are a helpful assistant."):
-        system_msg = [{"role": "system", "content": system_instructions}]
-        response_stream = self.get_response_stream(user_input, system_msg, max_tokens, temperature, top_p)
-        
-        print("Assistant: ", end="", flush=True)
-        for token in response_stream:
-            yield token
-        yield "\n"
+            
+    print("Assistant: ", end="", flush=True)
+    for token in outputs[0]["generated_text"]:
+        yield token
+    yield "\n"
 
